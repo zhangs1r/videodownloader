@@ -153,9 +153,9 @@ python setup.py build
 - 不需要安装Python
 - 需要管理员权限（用于自动关机功能）
 
-## 下载地址
+### 下载地址
 
-### 最新版本 v1.0.0
+#### 最新版本 v1.0.0
 
 - Windows 64位: [Bilibili视频下载器-v1.0.0-win64.zip](https://github.com/your-repo/releases/download/v1.0.0/Bilibili视频下载器-v1.0.0-win64.zip)
 - Windows 32位: [Bilibili视频下载器-v1.0.0-win32.zip](https://github.com/your-repo/releases/download/v1.0.0/Bilibili视频下载器-v1.0.0-win32.zip)

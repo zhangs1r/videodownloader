@@ -2,6 +2,12 @@
 downloads/
 downloads/*
 
+# 忽略打包生成的文件夹
+build/
+build/*
+dist/
+*.spec
+
 # Python
 __pycache__/
 *.py[cod]
