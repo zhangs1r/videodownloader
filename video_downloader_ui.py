@@ -82,21 +82,47 @@ class VideoDownloaderUI:
         
     def clean_filename(self, filename):
         """清理文件名，移除或替换非法字符"""
-        # Windows文件系统中的非法字符
-        invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
-        # 替换所有非法字符为短横线
-        for char in invalid_chars:
-            filename = filename.replace(char, '-')
-        # 替换其他可能的问题字符
-        filename = filename.replace('！', '!').replace('，', ',')
-        # 移除首尾空格和点
-        filename = filename.strip('. ')
+        # Windows文件系统中的非法字符和其他需要处理的特殊字符
+        invalid_chars = {
+            '\\': '-', '/': '-', ':': '-', '*': '-', 
+            '?': '-', '"': '-', '<': '-', '>': '-', 
+            '|': '-', '\n': ' ', '\r': ' ', '\t': ' ',
+            '《': '(', '》': ')', '【': '[', '】': ']',
+            '（': '(', '）': ')', '、': '-', '，': ',',
+            '。': '.', '！': '!', '？': '?', '：': '-',
+            '；': ';', '"': '"', '"': '"', ''': "'",
+            ''': "'", '「': '[', '」': ']', '『': '[',
+            '』': ']', '〈': '<', '〉': '>', '…': '-',
+            '—': '-', '～': '~', '·': '-', '￥': '$',
+            '％': '%', '＃': '#', '＆': '&', '＊': '*',
+            '＋': '+', '－': '-', '／': '/', '＝': '=',
+            '＠': '@', '＼': '\\', '＾': '^', '｜': '|',
+            '～': '~'
+        }
+        
+        # 替换所有特殊字符
+        for char, replacement in invalid_chars.items():
+            filename = filename.replace(char, replacement)
+        
+        # 移除连续的空格和特殊字符
+        while '  ' in filename:
+            filename = filename.replace('  ', ' ')
+        while '--' in filename:
+            filename = filename.replace('--', '-')
+        
+        # 移除首尾空格、点和特殊字符
+        filename = filename.strip(' .-')
+        
         # 如果文件名为空，使用默认名称
         if not filename:
             filename = "video"
+        
         # 限制文件名长度（Windows最大路径长度限制）
         if len(filename) > 200:
-            filename = filename[:200]
+            # 保留扩展名
+            name, ext = os.path.splitext(filename)
+            filename = name[:196] + ext if ext else name[:200]
+        
         return filename
         
     def update_progress(self, data):
@@ -338,15 +364,26 @@ class VideoDownloaderUI:
                 messagebox.showwarning("自动关机", "系统将在60秒后关机，取消请运行 'shutdown /a'")
         
         except ValueError as e:
-            messagebox.showerror("错误", str(e))
-            self.add_download_record(url, "失败", "N/A", "0%")
+            self.handle_error(str(e), url)
         except Exception as e:
-            messagebox.showerror("错误", f"下载失败: {str(e)}")
-            if hasattr(self, 'current_download_title'):
-                self.add_download_record(self.current_download_title, "失败", "N/A", "0%")
+            self.handle_error(f"下载失败: {str(e)}", 
+                             self.current_download_title if hasattr(self, 'current_download_title') else None)
         finally:
             self.download_btn["state"] = "normal"
             self.progress_bar["value"] = 0
+
+    def handle_error(self, error_msg, title=None):
+        """统一处理错误"""
+        # 提取更有用的错误信息
+        if "创建目录失败" in error_msg:
+            error_msg = f"无法创建下载目录，请检查:\n1. 文件夹名称是否包含特殊字符\n2. 是否有写入权限\n3. 路径是否过长\n\n详细错误: {error_msg}"
+        elif "文件名或目录名太长" in error_msg:
+            error_msg = "文件名或路径过长，请尝试使用更短的文件名"
+        
+        messagebox.showerror("错误", error_msg)
+        if title:
+            self.add_download_record(title, "失败", "N/A", "0%")
+        self.update_status(f"错误: {error_msg}")
 
 if __name__ == "__main__":
     root = ttk.Window(themename="darkly")

@@ -113,10 +113,15 @@ class VideoDownloader:
     
     def download_single_video(self, bvid, cid, title, save_path, callback=None, max_retries=3):
         """下载单个视频"""
-        video_url = self.get_video_url(bvid, cid)
-        file_path = os.path.join(save_path, f"{title}.mp4")
-        
         try:
+            # 清理文件名
+            clean_title = title.replace('\\', '-').replace('/', '-')
+            video_url = self.get_video_url(bvid, cid)
+            file_path = os.path.join(save_path, f"{clean_title}.mp4")
+            
+            # 确保目录存在
+            os.makedirs(os.path.dirname(file_path), exist_ok=True)
+            
             success = self.download_with_progress(video_url, file_path, callback, max_retries)
             if success:
                 return file_path
@@ -124,7 +129,10 @@ class VideoDownloader:
                 raise Exception("下载失败，已达到最大重试次数")
         except Exception as e:
             if os.path.exists(file_path):
-                os.remove(file_path)  # 删除不完整的文件
+                try:
+                    os.remove(file_path)  # 删除不完整的文件
+                except:
+                    pass
             raise
     
     def download_video(self, url, callback=None):
@@ -148,68 +156,123 @@ class VideoDownloader:
     
     def download_collection(self, video_id, collection_info, callback=None):
         """下载整个合集"""
-        folder_name = os.path.join('downloads', collection_info['title'])
-        if not os.path.exists(folder_name):
-            os.makedirs(folder_name)
-        
-        total_videos = len(collection_info['pages'])
-        failed_videos = []
-        retry_count = {}  # 记录每个视频的重试次数
-        
-        for index, page in enumerate(collection_info['pages'], 1):
-            if callback:
-                callback('status', f"正在下载 ({index}/{total_videos}): {page['part']}")
-                callback('new_video', {
-                    'title': page['part'],
-                    'status': '下载中',
-                    'path': os.path.join(folder_name, f"{index:02d}-{page['part']}.mp4")
-                })
+        # 使用更完整的文件名清理方法
+        def clean_path(name):
+            # 基础清理，处理最基本的非法字符
+            invalid_chars = {
+                '\\': '-', '/': '-', ':': '-', '*': '-', 
+                '?': '-', '"': '-', '<': '-', '>': '-', 
+                '|': '-', '\n': ' ', '\r': ' ', '\t': ' ',
+                '《': '(', '》': ')', '【': '[', '】': ']',
+                '（': '(', '）': ')', '、': '-', '，': ',',
+                '。': '.', '！': '!', '？': '?', '：': '-'
+            }
+            for char, replacement in invalid_chars.items():
+                name = name.replace(char, replacement)
+            # 移除连续的特殊字符和空格
+            while '  ' in name:
+                name = name.replace('  ', ' ')
+            while '--' in name:
+                name = name.replace('--', '-')
+            return name.strip(' .-')
+
+        try:
+            # 清理合集标题
+            clean_collection_title = clean_path(collection_info['title'])
+            if not clean_collection_title:
+                clean_collection_title = "未命名合集"
             
-            max_retries = 3
-            for retry in range(max_retries):
+            folder_name = os.path.join('downloads', clean_collection_title)
+            
+            # 确保路径长度不超过系统限制
+            if len(folder_name) > 200:
+                folder_name = folder_name[:200]
+            
+            # 创建目录，使用exist_ok=True避免竞争条件
+            try:
+                os.makedirs(folder_name, exist_ok=True)
+            except Exception as e:
+                raise Exception(f"创建目录失败 '{folder_name}': {str(e)}")
+            
+            total_videos = len(collection_info['pages'])
+            failed_videos = []
+            retry_count = {}  # 记录每个视频的重试次数
+            
+            for index, page in enumerate(collection_info['pages'], 1):
                 try:
-                    file_path = self.download_single_video(
-                        video_id,
-                        page['cid'],
-                        f"{index:02d}-{page['part']}",
-                        folder_name,
-                        lambda p: callback('progress', p) if callback else None
-                    )
+                    # 清理视频标题
+                    clean_title = clean_path(page['part'])
+                    if not clean_title:
+                        clean_title = f"视频{index}"
                     
-                    # 通知UI更新视频状态为完成
+                    # 添加序号前缀，确保文件名唯一
+                    file_name = f"{index:02d}-{clean_title}.mp4"
+                    file_path = os.path.join(folder_name, file_name)
+                    
+                    # 确保单个视频的完整路径不超过系统限制
+                    if len(file_path) > 255:  # Windows的MAX_PATH限制
+                        base_path = os.path.dirname(file_path)
+                        ext = os.path.splitext(file_name)[1]
+                        new_name = f"{index:02d}-视频{index}{ext}"
+                        file_path = os.path.join(base_path, new_name)
+                    
                     if callback:
-                        callback('video_complete', {
+                        callback('new_video', {
                             'title': page['part'],
-                            'status': '完成',
-                            'path': file_path,
-                            'progress': '100%'
+                            'status': '下载中',
+                            'path': file_path
                         })
-                    break  # 下载成功，跳出重试循环
                     
+                    max_retries = 3
+                    for retry in range(max_retries):
+                        try:
+                            self.download_single_video(
+                                video_id,
+                                page['cid'],
+                                f"{index:02d}-{clean_title}",
+                                folder_name,
+                                lambda p: callback('progress', p) if callback else None
+                            )
+                            
+                            # 通知UI更新视频状态为完成
+                            if callback:
+                                callback('video_complete', {
+                                    'title': page['part'],
+                                    'status': '完成',
+                                    'path': file_path,
+                                    'progress': '100%'
+                                })
+                            break  # 下载成功，跳出重试循环
+                            
+                        except Exception as e:
+                            retry_count[page['part']] = retry + 1
+                            if retry < max_retries - 1:
+                                if callback:
+                                    callback('retry', {
+                                        'title': page['part'],
+                                        'retry_count': retry + 1,
+                                        'error': str(e)
+                                    })
+                                print(f"下载失败，正在进行第{retry + 1}次重试: {page['part']} - {str(e)}")
+                                time.sleep(2)  # 等待2秒后重试
+                                continue
+                            else:
+                                print(f"下载失败: {page['part']} - {str(e)}")
+                                failed_videos.append(page['part'])
+                                if callback:
+                                    callback('video_failed', {
+                                        'title': page['part'],
+                                        'error': str(e)
+                                    })
                 except Exception as e:
-                    retry_count[page['part']] = retry + 1
-                    if retry < max_retries - 1:
-                        if callback:
-                            callback('retry', {
-                                'title': page['part'],
-                                'retry_count': retry + 1,
-                                'error': str(e)
-                            })
-                        print(f"下载失败，正在进行第{retry + 1}次重试: {page['part']} - {str(e)}")
-                        time.sleep(2)  # 等待2秒后重试
-                        continue
-                    else:
-                        print(f"下载失败: {page['part']} - {str(e)}")
-                        failed_videos.append(page['part'])
-                        if callback:
-                            callback('video_failed', {
-                                'title': page['part'],
-                                'error': str(e)
-                            })
-        
-        # 返回下载结果
-        return {
-            'success': len(collection_info['pages']) - len(failed_videos),
-            'failed': failed_videos,
-            'retry_info': retry_count
-        } 
+                    print(f"处理视频失败: {page['part']} - {str(e)}")
+                    failed_videos.append(page['part'])
+                    continue
+            
+            return {
+                'success': len(collection_info['pages']) - len(failed_videos),
+                'failed': failed_videos,
+                'retry_info': retry_count
+            }
+        except Exception as e:
+            raise Exception(f"处理合集失败: {str(e)}") 
