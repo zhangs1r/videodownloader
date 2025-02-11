@@ -80,6 +80,25 @@ class VideoDownloaderUI:
         # 添加一个字典来跟踪下载项
         self.download_items = {}
         
+    def clean_filename(self, filename):
+        """清理文件名，移除或替换非法字符"""
+        # Windows文件系统中的非法字符
+        invalid_chars = ['\\', '/', ':', '*', '?', '"', '<', '>', '|']
+        # 替换所有非法字符为短横线
+        for char in invalid_chars:
+            filename = filename.replace(char, '-')
+        # 替换其他可能的问题字符
+        filename = filename.replace('！', '!').replace('，', ',')
+        # 移除首尾空格和点
+        filename = filename.strip('. ')
+        # 如果文件名为空，使用默认名称
+        if not filename:
+            filename = "video"
+        # 限制文件名长度（Windows最大路径长度限制）
+        if len(filename) > 200:
+            filename = filename[:200]
+        return filename
+        
     def update_progress(self, data):
         """更新进度条和状态标签"""
         progress = data['progress']
@@ -198,16 +217,23 @@ class VideoDownloaderUI:
             self.update_status("正在获取视频信息...")
             self.download_btn["state"] = "disabled"
             
+            # 确保下载目录存在
+            if not os.path.exists('downloads'):
+                os.makedirs('downloads')
+            
             # 获取视频信息
             result = self.downloader.download_video(url)
             
             if result['is_collection']:
                 collection_info = result['info']
                 total_videos = len(collection_info['pages'])
-                collection_title = collection_info['title']
+                collection_title = self.clean_filename(collection_info['title'])
                 
-                # 先添加合集记录
+                # 创建合集目录
                 folder_path = os.path.join('downloads', collection_title)
+                if not os.path.exists(folder_path):
+                    os.makedirs(folder_path)
+                
                 self.add_download_record(
                     f"合集：{collection_title}",
                     "下载中",
@@ -223,6 +249,9 @@ class VideoDownloaderUI:
                 
                 if answer:
                     video_id = self.downloader.extract_video_id(url)
+                    # 清理每个视频的文件名
+                    for page in collection_info['pages']:
+                        page['part'] = self.clean_filename(page['part'])
                     result = self.downloader.download_collection(
                         video_id,
                         collection_info,
@@ -245,12 +274,13 @@ class VideoDownloaderUI:
                     del self.download_items[f"合集：{collection_title}"]
                     
                     video_info = collection_info['pages'][0]
-                    save_path = os.path.join('downloads', f"{video_info['part']}.mp4")
-                    self.current_download_title = video_info['part']
+                    clean_title = self.clean_filename(video_info['part'])
+                    save_path = os.path.join('downloads', f"{clean_title}.mp4")
+                    self.current_download_title = clean_title
                     
                     # 添加单个视频记录
                     self.add_download_record(
-                        video_info['part'],
+                        clean_title,  # 使用清理后的标题
                         "下载中",
                         save_path
                     )
@@ -258,14 +288,14 @@ class VideoDownloaderUI:
                     self.downloader.download_single_video(
                         self.downloader.extract_video_id(url),
                         video_info['cid'],
-                        video_info['part'],
+                        clean_title,  # 使用清理后的标题
                         'downloads',
                         lambda p: self.download_callback('progress', p)
                     )
                     
                     # 更新状态为完成
                     self.add_download_record(
-                        video_info['part'],
+                        clean_title,  # 使用清理后的标题
                         "完成",
                         save_path,
                         "100%"
@@ -273,12 +303,13 @@ class VideoDownloaderUI:
             else:
                 video_id = self.downloader.extract_video_id(url)
                 video_info = self.downloader.get_video_info(video_id)['data']
-                save_path = os.path.join('downloads', f"{video_info['title']}.mp4")
-                self.current_download_title = video_info['title']
+                clean_title = self.clean_filename(video_info['title'])
+                save_path = os.path.join('downloads', f"{clean_title}.mp4")
+                self.current_download_title = clean_title
                 
                 # 添加下载记录
                 self.add_download_record(
-                    video_info['title'],
+                    clean_title,  # 使用清理后的标题
                     "下载中",
                     save_path
                 )
@@ -286,14 +317,14 @@ class VideoDownloaderUI:
                 self.downloader.download_single_video(
                     video_id,
                     video_info['cid'],
-                    video_info['title'],
+                    clean_title,  # 使用清理后的标题
                     'downloads',
                     lambda p: self.download_callback('progress', p)
                 )
                 
                 # 更新状态为完成
                 self.add_download_record(
-                    video_info['title'],
+                    clean_title,  # 使用清理后的标题
                     "完成",
                     save_path,
                     "100%"
